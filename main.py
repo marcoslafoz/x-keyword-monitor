@@ -1,12 +1,9 @@
-# main.py
 import os
 import time
 import re
 import unicodedata
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, TimeoutError
-
-# --- ELIMINADO: 'import threading' ya no es necesario ---
 
 import smtplib, ssl
 from email.mime.text import MIMEText
@@ -75,7 +72,6 @@ POST_CONTAINER_SELECTOR = "div.timeline-item"
 POST_TEXT_SELECTOR = "div.tweet-content"
 POST_LINK_SELECTOR = "a.tweet-link"
 
-# --- MODIFICADO: Ya no necesitamos un candado 'lock' ---
 last_seen_post_id = {}
 
 
@@ -169,9 +165,6 @@ def check_for_keywords(post_text):
             return KEYWORDS_RAW[i]
     return None
 
-
-# --- NUEVA FUNCIÓN: Lógica de comprobación de una sola cuenta ---
-# (Esto es lo que antes hacía la función del hilo 'check_account_thread')
 def check_single_account(page, account):
     """Comprueba una sola cuenta y toma medidas si hay un post nuevo."""
     if not account:
@@ -210,11 +203,6 @@ def check_single_account(page, account):
     else:
         print(f"Sin posts nuevos para {account}.")
 
-
-# --- ELIMINADA: La función 'check_account_thread' se ha borrado ---
-
-
-# --- MODIFICADO: 'main_loop' ahora es secuencial con retraso dinámico ---
 def main_loop():
     print("Iniciando monitor SECUENCIAL DISTRIBUIDO (Playwright + Nitter)...")
     print(f"Instancia: {NITTER_URL}")
@@ -224,7 +212,6 @@ def main_loop():
     else:
         print("Horario de monitorización: 24/7")
 
-    # --- NUEVA LÓGICA DE TIEMPO ---
     accounts_list = [acc for acc in ACCOUNTS_TO_MONITOR if acc.strip()]
     num_accounts = len(accounts_list)
 
