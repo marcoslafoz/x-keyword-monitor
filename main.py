@@ -1,3 +1,4 @@
+# main.py
 import os
 import time
 import re
@@ -68,7 +69,7 @@ START_TIME_UTC = parse_utc_time(START_TIME_STR)
 END_TIME_UTC = parse_utc_time(END_TIME_STR)
 
 # --- Selectores de Nitter ---
-POST_CONTAINER_SELECTOR = "div.timeline-item"
+# (Estos selectores internos ya no son el principal, pero los mantenemos)
 POST_TEXT_SELECTOR = "div.tweet-content"
 POST_LINK_SELECTOR = "a.tweet-link"
 
@@ -120,19 +121,40 @@ def send_email_alert(account, keyword, post_text, post_id):
         print(f"ERROR: No se pudo enviar el email para @{account}: {e}")
 
 
+# --- ⬇️ AQUÍ ESTÁ LA MODIFICACIÓN ⬇️ ---
+
+
 def get_latest_post_data(page, account):
     """Obtiene el post más reciente usando Playwright en Nitter."""
     print(f"Buscando posts en perfil: {account}")
     try:
         url = f"{NITTER_URL}/{account}"
-        page.goto(url, wait_until="domcontentloaded", timeout=15000)
+        page.goto(url, wait_until="networkidle", timeout=15000)
 
-        page.wait_for_selector(POST_CONTAINER_SELECTOR, timeout=10000)
-        latest_post_element = page.query_selector(POST_CONTAINER_SELECTOR)
+        # 1. Esperar a que CUALQUIER item del timeline cargue
+        page.wait_for_selector("div.timeline-item", timeout=10000)
+
+        # 2. Obtener TODOS los items del timeline
+        all_post_elements = page.query_selector_all("div.timeline > div.timeline-item")
+
+        latest_post_element = None
+
+        # 3. Iterar y encontrar el PRIMERO que NO esté fijado
+        for element in all_post_elements:
+            # Comprobar si este elemento contiene la marca 'pinned'
+            is_pinned = element.query_selector("div.pinned")
+
+            # Si 'is_pinned' es None (o sea, no lo ha encontrado),
+            # significa que este es el primer post NO fijado.
+            if not is_pinned:
+                latest_post_element = element
+                break  # ¡Encontrado! Salimos del bucle.
 
         if not latest_post_element:
+            print(f"No se encontró ningún post 'real' (no fijado) para {account}.")
             return None, None
 
+        # 4. (El resto del código es igual) Extraer el texto y el ID
         text_element = latest_post_element.query_selector(POST_TEXT_SELECTOR)
         post_text = text_element.inner_text() if text_element else ""
 
@@ -147,12 +169,18 @@ def get_latest_post_data(page, account):
             post_id = post_text[:50]
 
         return post_id, post_text
+
     except TimeoutError:
-        print(f"Timeout esperando la página de {account}. ¿Instancia de Nitter caída?")
+        print(
+            f"Timeout esperando la página de {account}. ¿Instancia de Nitter caída o bloqueando por bot?"
+        )
         return None, None
     except Exception as e:
         print(f"Error inesperado al procesar {account}: {e}")
         return None, None
+
+
+# --- ⬆️ AQUÍ TERMINA LA MODIFICACIÓN ⬆️ ---
 
 
 def check_for_keywords(post_text):
@@ -165,6 +193,7 @@ def check_for_keywords(post_text):
             return KEYWORDS_RAW[i]
     return None
 
+
 def check_single_account(page, account):
     """Comprueba una sola cuenta y toma medidas si hay un post nuevo."""
     if not account:
@@ -174,10 +203,9 @@ def check_single_account(page, account):
     post_id, post_text = get_latest_post_data(page, account)
 
     if not post_id:
-        print(f"No se pudo obtener post para {account}.")
+        # El error ya se imprimió en get_latest_post_data
         return
 
-    # No se necesita candado 'lock', es secuencial
     last_id = last_seen_post_id.get(account)
 
     if post_id != last_id:
@@ -198,19 +226,13 @@ def check_single_account(page, account):
                 f"INFO: Nuevo post de @{account} (sin keywords): {post_text[:100]}..."
             )
 
-        # Actualización secuencial segura
         last_seen_post_id[account] = post_id
     else:
         print(f"Sin posts nuevos para {account}.")
 
+
 def main_loop():
     print("Iniciando monitor SECUENCIAL DISTRIBUIDO (Playwright + Nitter)...")
-    print(f"Instancia: {NITTER_URL}")
-    print(f"Keywords (originales): {KEYWORDS_RAW}")
-    if START_TIME_UTC and END_TIME_UTC:
-        print(f"Horario de monitorización (UTC): {START_TIME_UTC} a {END_TIME_UTC}")
-    else:
-        print("Horario de monitorización: 24/7")
 
     accounts_list = [acc for acc in ACCOUNTS_TO_MONITOR if acc.strip()]
     num_accounts = len(accounts_list)
@@ -219,9 +241,7 @@ def main_loop():
         print("ERROR: No hay cuentas para monitorizar. Saliendo.")
         return
 
-    # Calcular el retraso dinámico
     try:
-        # El tiempo de espera es el intervalo TOTAL dividido por el número de cuentas
         delay_between_checks = CHECK_INTERVAL / num_accounts
     except ZeroDivisionError:
         print(
@@ -233,32 +253,29 @@ def main_loop():
         f"Total de {num_accounts} cuentas. Intervalo total del ciclo: {CHECK_INTERVAL}s."
     )
     print(f"Se comprobará una cuenta cada {delay_between_checks:.2f} segundos.")
-    # --- FIN DE LÓGICA DE TIEMPO ---
+
+    if START_TIME_UTC and END_TIME_UTC:
+        print(f"Horario de monitorización (UTC): {START_TIME_UTC} a {END_TIME_UTC}")
+    else:
+        print("Horario de monitorización: 24/7")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=not SHOW_BROWSER)
-        # Creamos UN contexto y UNA página que se reutilizarán en serie
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
-            java_script_enabled=False,
+            # Forzamos un viewport de escritorio para parecer un navegador real
+            viewport={"width": 1920, "height": 1080},
         )
         page = context.new_page()
 
         try:
-            account_index = 0  # Usamos un índice para saber qué cuenta toca
+            account_index = 0
             while True:
-                # Comprobar si estamos en la franja horaria
                 if is_within_time_window():
-
-                    # Obtener la cuenta que toca comprobar en este ciclo
                     account_to_check = accounts_list[account_index]
-
                     print("\n--- Horario activo. ---")
-                    # Llamar a la función de comprobación para esa única cuenta
                     check_single_account(page, account_to_check)
-
                 else:
-                    # Estamos fuera de horario, saltamos la comprobación
                     print(
                         f"\n--- Fuera del horario de monitorización (UTC {START_TIME_UTC} - {END_TIME_UTC}). Durmiendo... ---"
                     )
@@ -266,21 +283,22 @@ def main_loop():
                         f"(La próxima cuenta a comprobar será: {accounts_list[account_index]})"
                     )
 
-                # Mover el índice a la siguiente cuenta para el próximo ciclo
                 account_index = (account_index + 1) % num_accounts
 
-                # Esperar el tiempo dinámico calculado ANTES de comprobar la siguiente cuenta
                 print(
                     f"--- Ciclo parcial completado. Esperando {delay_between_checks:.2f} segundos... ---"
                 )
                 time.sleep(delay_between_checks)
 
         except KeyboardInterrupt:
-            print("\nDeteniendo el monitor.")
+            print("\n\n--- Programa parado por el usuario (Ctrl+C). ---")
+
         finally:
+            print("--- Cerrando el navegador... ---")
             page.close()
             context.close()
             browser.close()
+            print("--- ¡Adiós! ---")
 
 
 if __name__ == "__main__":
