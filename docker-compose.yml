@@ -1,0 +1,9 @@
+services:
+  x-keyword-monitor:
+    build: .
+
+    env_file:
+      - .env
+    restart: unless-stopped
+    stdin_open: true  
+    tty: true         
