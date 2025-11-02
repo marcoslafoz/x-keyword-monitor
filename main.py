@@ -1,3 +1,4 @@
+# main.py
 import os
 import time
 import re
@@ -136,25 +137,21 @@ def get_latest_post_data(page, account):
         url = f"{NITTER_URL}/{account}"
         page.goto(url, wait_until="networkidle", timeout=15000)
 
-        # Esperar a que CUALQUIER item del timeline cargue
         page.wait_for_selector("div.timeline-item", timeout=10000)
-
         all_post_elements = page.query_selector_all("div.timeline > div.timeline-item")
 
         latest_post_element = None
 
-        # Iterar y encontrar el PRIMERO que NO esté fijado (pinned)
         for element in all_post_elements:
             is_pinned = element.query_selector("div.pinned")
             if not is_pinned:
                 latest_post_element = element
-                break  # Encontrado el primer post no-fijado
+                break
 
         if not latest_post_element:
             print(f"No se encontró ningún post 'real' (no fijado) para {account}.")
             return None, None
 
-        # Extraer el texto y el ID
         text_element = latest_post_element.query_selector(POST_TEXT_SELECTOR)
         post_text = text_element.inner_text() if text_element else ""
 
@@ -165,7 +162,6 @@ def get_latest_post_data(page, account):
             if href:
                 post_id = href.split("/")[-1].split("#")[0]
 
-        # Fallback por si no se encuentra el ID
         if not post_id:
             post_id = post_text[:50]
 
@@ -190,7 +186,7 @@ def check_for_keywords(post_text):
 
     for i, normalized_keyword in enumerate(KEYWORDS_TO_SEARCH):
         if normalized_keyword in normalized_post_text:
-            return KEYWORDS_RAW[i]  # Devuelve la keyword original
+            return KEYWORDS_RAW[i]
     return None
 
 
@@ -222,11 +218,17 @@ def check_single_account(page, account):
             print("*" * 40)
             send_email_alert(account, found_keyword, post_text, post_id)
         else:
-            # MODIFICACIÓN: Mostrar solo la primera línea del post
-            first_line = post_text.split("\n")[0]
-            print(
-                f"INFO: Nuevo post de @{account} (sin keywords): {first_line[:100]}..."
-            )
+            # MODIFICACIÓN MEJORADA: Comprobar si el post tiene texto
+            if post_text and post_text.strip():
+                first_line = post_text.split("\n")[0]
+                print(
+                    f"INFO: Nuevo post de @{account} (sin keywords): {first_line[:100]}..."
+                )
+            else:
+                # Si post_text está vacío o solo tiene espacios
+                print(
+                    f"INFO: Nuevo post de @{account} (sin keywords): [Post sin texto (solo multimedia o enlace)]"
+                )
 
         last_seen_post_id[account] = post_id
     else:
@@ -245,7 +247,6 @@ def main_loop():
         return
 
     try:
-        # Distribuye el chequeo de cuentas a lo largo del intervalo total
         delay_between_checks = CHECK_INTERVAL / num_accounts
     except ZeroDivisionError:
         print(
@@ -286,7 +287,6 @@ def main_loop():
                         f"(La próxima cuenta a comprobar será: {accounts_list[account_index]})"
                     )
 
-                # Avanza a la siguiente cuenta en la lista
                 account_index = (account_index + 1) % num_accounts
 
                 print(
