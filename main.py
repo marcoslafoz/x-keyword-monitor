@@ -1,4 +1,3 @@
-# main.py
 import os
 import time
 import re
@@ -24,20 +23,20 @@ def normalize_text(text):
         return text.lower()
 
 
-# --- Configuración ---
+# --- Configuración y Carga de Variables ---
 load_dotenv()
 
-# Configuración de Nitter
+# Nitter
 NITTER_URL = os.getenv("NITTER_INSTANCE_URL", "https://nitter.net")
 ACCOUNTS_TO_MONITOR = os.getenv("X_ACCOUNTS", "").split(",")
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL_SECONDS", 300))
 SHOW_BROWSER = os.getenv("SHOW_BROWSER", "False").lower() == "true"
 
-# Configuración de Keywords
+# Keywords
 KEYWORDS_RAW = [k for k in os.getenv("KEYWORDS", "").split(",") if k]
 KEYWORDS_TO_SEARCH = [normalize_text(k) for k in KEYWORDS_RAW]
 
-# Configuración de Email
+# Email
 SMTP_SERVER = os.getenv("SMTP_SERVER")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
 SMTP_USER = os.getenv("SMTP_USER")
@@ -48,12 +47,13 @@ EMAIL_RECIPIENTS = [
     if email.strip()
 ]
 
-# Configuración de Horario
+# Horario (UTC)
 START_TIME_STR = os.getenv("START_TIME_UTC")
 END_TIME_STR = os.getenv("END_TIME_UTC")
 
 
 def parse_utc_time(time_str):
+    """Convierte un string 'HH:MM' a un objeto time."""
     if not time_str:
         return None
     try:
@@ -69,23 +69,27 @@ START_TIME_UTC = parse_utc_time(START_TIME_STR)
 END_TIME_UTC = parse_utc_time(END_TIME_STR)
 
 # --- Selectores de Nitter ---
-# (Estos selectores internos ya no son el principal, pero los mantenemos)
 POST_TEXT_SELECTOR = "div.tweet-content"
 POST_LINK_SELECTOR = "a.tweet-link"
 
+# --- Estado Global ---
 last_seen_post_id = {}
 
 
 def is_within_time_window():
     """Comprueba si la hora actual UTC está dentro de la franja definida."""
     if not START_TIME_UTC or not END_TIME_UTC:
-        return True
+        return True  # Si no hay horario, se ejecuta 24/7
+
     current_utc_time = datetime.now(timezone.utc).time()
     start = START_TIME_UTC
     end = END_TIME_UTC
+
     if start <= end:
+        # Horario normal (p.ej. 09:00 a 17:00)
         return start <= current_utc_time <= end
     else:
+        # Horario que cruza la medianoche (p.ej. 22:00 a 04:00)
         return current_utc_time >= start or current_utc_time <= end
 
 
@@ -94,12 +98,15 @@ def send_email_alert(account, keyword, post_text, post_id):
     if not SMTP_USER or not SMTP_PASSWORD or not EMAIL_RECIPIENTS:
         print("INFO: Variables de SMTP no configuradas. Saltando envío de email.")
         return
+
     print(f"Enviando alerta por email a: {', '.join(EMAIL_RECIPIENTS)}")
     message = MIMEMultipart("alternative")
     message["Subject"] = f"Alerta de Keyword: @{account} mencionó '{keyword}'"
     message["From"] = SMTP_USER
     message["To"] = ", ".join(EMAIL_RECIPIENTS)
+
     post_url = f"{NITTER_URL}/{account}/status/{post_id}"
+
     text = f"""
     ¡Alerta!
     La cuenta @{account} ha publicado un nuevo post que contiene la palabra clave: '{keyword}'.
@@ -110,6 +117,7 @@ def send_email_alert(account, keyword, post_text, post_id):
     Enlace al post: {post_url}
     """
     message.attach(MIMEText(text, "plain"))
+
     try:
         context = ssl.create_default_context()
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
@@ -121,40 +129,32 @@ def send_email_alert(account, keyword, post_text, post_id):
         print(f"ERROR: No se pudo enviar el email para @{account}: {e}")
 
 
-# --- ⬇️ AQUÍ ESTÁ LA MODIFICACIÓN ⬇️ ---
-
-
 def get_latest_post_data(page, account):
-    """Obtiene el post más reciente usando Playwright en Nitter."""
+    """Obtiene el post más reciente (no fijado) de una cuenta de Nitter."""
     print(f"Buscando posts en perfil: {account}")
     try:
         url = f"{NITTER_URL}/{account}"
         page.goto(url, wait_until="networkidle", timeout=15000)
 
-        # 1. Esperar a que CUALQUIER item del timeline cargue
+        # Esperar a que CUALQUIER item del timeline cargue
         page.wait_for_selector("div.timeline-item", timeout=10000)
 
-        # 2. Obtener TODOS los items del timeline
         all_post_elements = page.query_selector_all("div.timeline > div.timeline-item")
 
         latest_post_element = None
 
-        # 3. Iterar y encontrar el PRIMERO que NO esté fijado
+        # Iterar y encontrar el PRIMERO que NO esté fijado (pinned)
         for element in all_post_elements:
-            # Comprobar si este elemento contiene la marca 'pinned'
             is_pinned = element.query_selector("div.pinned")
-
-            # Si 'is_pinned' es None (o sea, no lo ha encontrado),
-            # significa que este es el primer post NO fijado.
             if not is_pinned:
                 latest_post_element = element
-                break  # ¡Encontrado! Salimos del bucle.
+                break  # Encontrado el primer post no-fijado
 
         if not latest_post_element:
             print(f"No se encontró ningún post 'real' (no fijado) para {account}.")
             return None, None
 
-        # 4. (El resto del código es igual) Extraer el texto y el ID
+        # Extraer el texto y el ID
         text_element = latest_post_element.query_selector(POST_TEXT_SELECTOR)
         post_text = text_element.inner_text() if text_element else ""
 
@@ -165,6 +165,7 @@ def get_latest_post_data(page, account):
             if href:
                 post_id = href.split("/")[-1].split("#")[0]
 
+        # Fallback por si no se encuentra el ID
         if not post_id:
             post_id = post_text[:50]
 
@@ -180,17 +181,16 @@ def get_latest_post_data(page, account):
         return None, None
 
 
-# --- ⬆️ AQUÍ TERMINA LA MODIFICACIÓN ⬆️ ---
-
-
 def check_for_keywords(post_text):
     """Comprueba keywords normalizadas contra el texto del post normalizado."""
     if not post_text:
         return None
+
     normalized_post_text = normalize_text(post_text)
+
     for i, normalized_keyword in enumerate(KEYWORDS_TO_SEARCH):
         if normalized_keyword in normalized_post_text:
-            return KEYWORDS_RAW[i]
+            return KEYWORDS_RAW[i]  # Devuelve la keyword original
     return None
 
 
@@ -222,8 +222,10 @@ def check_single_account(page, account):
             print("*" * 40)
             send_email_alert(account, found_keyword, post_text, post_id)
         else:
+            # MODIFICACIÓN: Mostrar solo la primera línea del post
+            first_line = post_text.split("\n")[0]
             print(
-                f"INFO: Nuevo post de @{account} (sin keywords): {post_text[:100]}..."
+                f"INFO: Nuevo post de @{account} (sin keywords): {first_line[:100]}..."
             )
 
         last_seen_post_id[account] = post_id
@@ -232,16 +234,18 @@ def check_single_account(page, account):
 
 
 def main_loop():
+    """Bucle principal del monitor."""
     print("Iniciando monitor SECUENCIAL DISTRIBUIDO (Playwright + Nitter)...")
 
-    accounts_list = [acc for acc in ACCOUNTS_TO_MONITOR if acc.strip()]
+    accounts_list = [acc.strip() for acc in ACCOUNTS_TO_MONITOR if acc.strip()]
     num_accounts = len(accounts_list)
 
     if num_accounts == 0:
-        print("ERROR: No hay cuentas para monitorizar. Saliendo.")
+        print("ERROR: No hay cuentas para monitorizar (X_ACCOUNTS). Saliendo.")
         return
 
     try:
+        # Distribuye el chequeo de cuentas a lo largo del intervalo total
         delay_between_checks = CHECK_INTERVAL / num_accounts
     except ZeroDivisionError:
         print(
@@ -263,7 +267,6 @@ def main_loop():
         browser = p.chromium.launch(headless=not SHOW_BROWSER)
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
-            # Forzamos un viewport de escritorio para parecer un navegador real
             viewport={"width": 1920, "height": 1080},
         )
         page = context.new_page()
@@ -283,6 +286,7 @@ def main_loop():
                         f"(La próxima cuenta a comprobar será: {accounts_list[account_index]})"
                     )
 
+                # Avanza a la siguiente cuenta en la lista
                 account_index = (account_index + 1) % num_accounts
 
                 print(
