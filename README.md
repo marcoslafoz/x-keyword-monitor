@@ -1,23 +1,83 @@
-# 🤖 X/Nitter Keyword Monitor
+# 🤖 Monitor de Keywords para X (vía Nitter)
 
-Un bot de monitorización que comprueba cuentas de X (a través de Nitter) en busca de nuevos posts que contengan palabras clave específicas. Cuando encuentra una coincidencia, envía una alerta por correo electrónico.
+Un bot simple que vigila perfiles de X (a través de una instancia de Nitter) en busca de palabras clave específicas. Cuando encuentra una coincidencia en un post nuevo, envía una alerta instantánea por correo electrónico.
 
-El script está diseñado para ser robusto, eficiente y fácil de configurar, todo ello dentro de un contenedor Docker.
+## ✨ Características Principales
 
-## ✨ Características
+  * **Monitorización Múltiple:** Vigila varias cuentas de X al mismo tiempo.
+  * **Detección de Keywords:** Busca en los posts una lista personalizable de palabras clave.
+  * **Detección Inteligente:** Ignora tildes, mayúsculas y minúsculas. (`"Urgente"` y `"urgénte"` coincidirán con `"urgente"`).
+  * **Alertas por Email:** Envía notificaciones inmediatas usando SMTP (probado con Gmail).
+  * **Horario Programable:** Puedes definir una franja horaria en UTC (ej. de `09:00` a `17:00`) para que el bot solo esté activo en ese periodo.
+  * **Eficiente:** Distribuye las comprobaciones de forma equitativa para no sobrecargar el servidor.
 
-* **Monitorización de Múltiples Cuentas:** Vigila varias cuentas de X simultáneamente.
-* **Búsqueda de Múltiples Keywords:** Detecta una lista personalizable de palabras clave.
-* **Detección Inteligente:** Ignora mayúsculas, minúsculas, tildes y espacios en las palabras clave (p.ej., "Urgente", "urgénte", "u r g e n t e" coincidirán con "urgente").
-* **Alertas por Email:** Envía notificaciones instantáneas a través de SMTP (probado con Gmail).
-* **Horario Programable:** Define una franja horaria en UTC (inicio y fin) para que el monitor solo se ejecute cuando tú quieras.
-* **Comprobaciones Distribuidas:** Distribuye de forma inteligente el tiempo de comprobación. Si tienes 10 cuentas y un intervalo de 60 minutos, comprobará una cuenta cada 6 minutos, evitando sobrecargar el servidor.
-* **Totalmente Contenerizado:** Todo el proyecto se ejecuta en un contenedor Docker con Docker Compose para una configuración y despliegue sencillos.
+## 🚀 Instalación y Puesta en Marcha (con `uv`)
+
+Sigue estos pasos para ejecutar el monitor en tu máquina local usando `uv`.
+
+### 1\. Prerrequisitos
+
+Asegúrate de tener **Python 3.10+** y `uv` instalados. Si no tienes `uv`, puedes instalarlo rápidamente:
+
+```bash
+# En macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# En Windows (PowerShell)
+irm https://astral.sh/uv/install.ps1 | iex
+```
+
+### 2\. Clonar el Repositorio
+
+```bash
+git clone https://github.com/marcoslafoz/x-keyword-monitor.git
+cd x-keyword-monitor
+```
+
+### 3\. Configurar el Entorno
+
+Copia el archivo de ejemplo `.env.example` y renómbralo a `.env`.
+
+```bash
+cp .env.example .env
+```
+
+Ahora, **edita el archivo `.env`** y rellena todas las variables:
+
+  * `NITTER_INSTANCE_URL`: La URL de la instancia de Nitter que quieres usar (ej. `https://nitter.net`).
+  * `X_ACCOUNTS`: Las cuentas de X a vigilar, separadas por comas (ej. `perfil1,perfil2`).
+  * `KEYWORDS`: Las palabras clave a buscar, separadas por comas (ej. `alerta,urgente,importante`).
+  * `EMAIL_RECIPIENTS`: Los correos que recibirán las alertas (separados por comas).
+  * `SMTP_SERVER`: Tu servidor de correo (ej. `smtp.gmail.com`).
+  * `SMTP_PORT`: El puerto (ej. `587`).
+  * `SMTP_USER`: Tu email de envío.
+  * `SMTP_PASSWORD`: Tu contraseña de aplicación (si usas Gmail/Google).
+  * `START_TIME_UTC` (Opcional): Hora de inicio en formato `HH:MM`.
+  * `END_TIME_UTC` (Opcional): Hora de fin en formato `HH:MM`.
+
+### 4\. Instalar y Ejecutar
+
+`uv` puede crear el entorno, instalar las dependencias y ejecutar el script. No necesitas activar el entorno manualmente.
+
+```bash
+# 1. Crea el entorno virtual (creará una carpeta .venv)
+uv venv
+
+# 2. Instala las dependencias de Python en el .venv
+uv pip install -r requirements.txt
+
+# 3. Instala el navegador (ejecutando el comando *dentro* del .venv)
+uv run playwright install chromium
+
+# 4. Ejecuta el bot
+uv run main.py
+```
+
+El bot comenzará a funcionar y verás los logs directamente en tu terminal.
 
 ## 🛠️ Stack Tecnológico
 
-* **🐍 Python 3.11+**
-* **🤖 Playwright:** Para controlar un navegador *headless* y navegar por Nitter.
-* **💠 Nitter:** Se usa como *frontend* alternativo a X.com para evitar bloqueos de inicio de sesión y diseños complejos.
-* **⚡ uv:** El gestor de paquetes y entorno virtual de alta velocidad.
-* **🐳 Docker & Docker Compose:** Para crear una imagen y ejecutar la aplicación de forma aislada y reproducible.
+  * **🐍 Python 3.11+**
+  * **🤖 Playwright:** Para controlar el navegador *headless* y leer Nitter.
+  * **💠 Nitter:** Se usa como *frontend* alternativo a X para evitar bloqueos.
+  * **⚡ uv:** El gestor de paquetes y entorno virtual de alta velocidad.
