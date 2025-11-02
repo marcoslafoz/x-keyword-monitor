@@ -100,7 +100,7 @@ def send_email_alert(account, keyword, post_text, post_id):
         print("INFO: Variables de SMTP no configuradas. Saltando envío de email.")
         return
 
-    print(f"Enviando alerta por email a: {', '.join(EMAIL_RECIPIENTS)}")
+    print(f"    -> Enviando alerta por email a: {', '.join(EMAIL_RECIPIENTS)}")
     message = MIMEMultipart("alternative")
     message["Subject"] = f"Alerta de Keyword: @{account} mencionó '{keyword}'"
     message["From"] = SMTP_USER
@@ -125,14 +125,14 @@ def send_email_alert(account, keyword, post_text, post_id):
             server.starttls(context=context)
             server.login(SMTP_USER, SMTP_PASSWORD)
             server.sendmail(SMTP_USER, EMAIL_RECIPIENTS, message.as_string())
-        print(f"¡Email de alerta enviado con éxito para @{account}!")
+        print(f"    -> ¡Email de alerta enviado con éxito para @{account}!")
     except Exception as e:
-        print(f"ERROR: No se pudo enviar el email para @{account}: {e}")
+        print(f"    -> ERROR: No se pudo enviar el email para @{account}: {e}")
 
 
 def get_latest_post_data(page, account):
     """Obtiene el post más reciente (no fijado) de una cuenta de Nitter."""
-    print(f"Buscando posts en perfil: {account}")
+    # print(f"Buscando posts en perfil: {account}") # Eliminado por limpieza de log
     try:
         url = f"{NITTER_URL}/{account}"
         page.goto(url, wait_until="networkidle", timeout=15000)
@@ -168,12 +168,14 @@ def get_latest_post_data(page, account):
         return post_id, post_text
 
     except TimeoutError:
+        timestamp = datetime.now().strftime("%H:%M")
         print(
-            f"Timeout esperando la página de {account}. ¿Instancia de Nitter caída o bloqueando por bot?"
+            f"{timestamp} - ERROR: Timeout esperando la página de {account}. ¿Instancia de Nitter caída?"
         )
         return None, None
     except Exception as e:
-        print(f"Error inesperado al procesar {account}: {e}")
+        timestamp = datetime.now().strftime("%H:%M")
+        print(f"{timestamp} - ERROR: Inesperado al procesar {account}: {e}")
         return None, None
 
 
@@ -195,44 +197,40 @@ def check_single_account(page, account):
     if not account:
         return
 
-    print(f"\n--- Comprobando {account} ---")
+    # Obtener el timestamp para todos los logs de esta función
+    timestamp = datetime.now().strftime("%H:%M")
+
     post_id, post_text = get_latest_post_data(page, account)
 
     if not post_id:
-        # El error ya se imprimió en get_latest_post_data
+        # El error ya se imprimió (con timestamp) en get_latest_post_data
         return
 
     last_id = last_seen_post_id.get(account)
 
     if post_id != last_id:
-        print(f"¡NUEVO POST DETECTADO para {account}!")
-
         found_keyword = check_for_keywords(post_text)
 
         if found_keyword:
-            print("*" * 40)
+            first_line = post_text.split("\n")[0].strip()
             print(
-                f"¡¡ALERTA!! El post de @{account} CONTIENE la palabra: '{found_keyword}'"
+                f"{timestamp} - Post detectado en el perfil: {account} ({found_keyword}): {first_line[:100]}..."
             )
-            print(f"Texto: {post_text[:150]}...")
-            print("*" * 40)
             send_email_alert(account, found_keyword, post_text, post_id)
         else:
-            # MODIFICACIÓN MEJORADA: Comprobar si el post tiene texto
             if post_text and post_text.strip():
                 first_line = post_text.split("\n")[0]
                 print(
-                    f"INFO: Nuevo post de @{account} (sin keywords): {first_line[:100]}..."
+                    f"{timestamp} - Post detectado en el perfil: {account} (sin keywords): {first_line[:100]}..."
                 )
             else:
-                # Si post_text está vacío o solo tiene espacios
                 print(
-                    f"INFO: Nuevo post de @{account} (sin keywords): [Post sin texto (solo multimedia o enlace)]"
+                    f"{timestamp} - Post detectado en el perfil: {account} (sin keywords): [Post sin texto (solo multimedia o enlace)]"
                 )
 
         last_seen_post_id[account] = post_id
     else:
-        print(f"Sin posts nuevos para {account}.")
+        print(f"{timestamp} - Sin nuevos post en el perfil: {account}")
 
 
 def main_loop():
@@ -274,24 +272,37 @@ def main_loop():
 
         try:
             account_index = 0
-            while True:
-                if is_within_time_window():
-                    account_to_check = accounts_list[account_index]
-                    print("\n--- Horario activo. ---")
-                    check_single_account(page, account_to_check)
-                else:
-                    print(
-                        f"\n--- Fuera del horario de monitorización (UTC {START_TIME_UTC} - {END_TIME_UTC}). Durmiendo... ---"
-                    )
-                    print(
-                        f"(La próxima cuenta a comprobar será: {accounts_list[account_index]})"
-                    )
+            # Variable para rastrear el estado del horario (None, True, False)
+            active_status = None
 
+            while True:
+                current_status_active = is_within_time_window()
+                timestamp = datetime.now().strftime("%H:%M")
+
+                if current_status_active:
+                    # Si el estado ha cambiado a activo (o es la primera vez)
+                    if active_status != True:
+                        print(f"\n{timestamp} - Horario activo.")
+                        active_status = True
+
+                    # Comprobar la cuenta
+                    account_to_check = accounts_list[account_index]
+                    check_single_account(page, account_to_check)
+
+                else:
+                    # Si el estado ha cambiado a inactivo (o es la primera vez)
+                    if active_status != False:
+                        print(
+                            f"\n{timestamp} - Fuera del horario de monitorización (UTC {START_TIME_UTC} - {END_TIME_UTC}). Durmiendo..."
+                        )
+                        active_status = False
+
+                    # No hacemos nada, solo esperamos a que sea la hora
+
+                # Avanzar al siguiente índice de cuenta
                 account_index = (account_index + 1) % num_accounts
 
-                print(
-                    f"--- Ciclo parcial completado. Esperando {delay_between_checks:.2f} segundos... ---"
-                )
+                # Esperar antes de comprobar la siguiente cuenta
                 time.sleep(delay_between_checks)
 
         except KeyboardInterrupt:
